@@ -1,0 +1,53 @@
+from pydantic import BaseModel
+from typing import List, Optional
+
+# --- РАСПИСАНИЕ ---
+class ScheduleSlot(BaseModel):
+    day: str
+    time: str
+    group: str
+    subject: str
+    teacher: str
+    room: str
+    class_type: str
+
+    class Config:
+        from_attributes = True
+
+class ScheduleResponse(BaseModel):
+    schedule: List[ScheduleSlot]
+    generated_at: str
+
+# --- ПРЕПОДАВАТЕЛИ ---
+class TeacherBase(BaseModel):
+    full_name: str
+    max_hours_per_week: int = 20
+
+class TeacherCreate(TeacherBase):
+    pass
+
+class TeacherResponse(TeacherBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+# --- ПРЕДМЕТЫ И СВЯЗИ ---
+class SubjectBase(BaseModel):
+    name: str
+    credits: int = 5
+    lectures_per_week: int = 1
+    practices_per_week: int = 2
+    course: int = 1
+    semester: int = 1
+    teacher_ids: List[int] = []  # <--- Сайт будет присылать ID выбранных преподов
+
+class SubjectCreate(SubjectBase):
+    pass
+
+class SubjectResponse(SubjectBase):
+    id: int
+    teachers: List[TeacherResponse] = []  # <--- Сервер будет отдавать список привязанных преподов
+
+    class Config:
+        from_attributes = True

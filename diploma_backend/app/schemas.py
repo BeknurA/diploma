@@ -5,11 +5,15 @@ from typing import List, Optional
 class ScheduleSlot(BaseModel):
     day: str
     time: str
+    time_index: int = 0
     group: str
     subject: str
     teacher: str
     room: str
     class_type: str
+    shift: int = 1
+    course: int = 1
+    language: str = "RU"
 
     class Config:
         from_attributes = True
@@ -17,6 +21,7 @@ class ScheduleSlot(BaseModel):
 class ScheduleResponse(BaseModel):
     schedule: List[ScheduleSlot]
     generated_at: str
+    semester: Optional[int] = None
 
 # --- ПРЕПОДАВАТЕЛИ ---
 class TeacherBase(BaseModel):
@@ -40,14 +45,14 @@ class SubjectBase(BaseModel):
     practices_per_week: int = 2
     course: int = 1
     semester: int = 1
-    teacher_ids: List[int] = []  # <--- Сайт будет присылать ID выбранных преподов
+    teacher_ids: List[int] = []
 
 class SubjectCreate(SubjectBase):
     pass
 
 class SubjectResponse(SubjectBase):
     id: int
-    teachers: List[TeacherResponse] = []  # <--- Сервер будет отдавать список привязанных преподов
+    teachers: List[TeacherResponse] = []
 
     class Config:
         from_attributes = True

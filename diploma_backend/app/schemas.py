@@ -14,6 +14,7 @@ class ScheduleSlot(BaseModel):
     shift: int = 1
     course: int = 1
     language: str = "RU"
+    semester: Optional[int] = None   # ← добавлено
 
     class Config:
         from_attributes = True
@@ -37,7 +38,7 @@ class TeacherResponse(TeacherBase):
     class Config:
         from_attributes = True
 
-# --- ПРЕДМЕТЫ И СВЯЗИ ---
+# --- ПРЕДМЕТЫ ---
 class SubjectBase(BaseModel):
     name: str
     credits: int = 5

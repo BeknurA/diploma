@@ -305,6 +305,7 @@ const T: Record<Lang, Record<string, string>> = {
     add_btn: 'Добавить', delete_confirm: 'Удалить?',
     solver_time: 'Время решения', solver_status: 'Статус',
     eff_formula: 'Баланс смен = min(Смена1, Смена2) / max(Смена1, Смена2) × 100%. Показывает насколько равномерно занятия распределены между 1-й и 2-й сменами. 100% = идеальный баланс.',
+    nav_availability: 'Свободные окна',
   },
   kz: {
     nav_dashboard: 'Басты бет', nav_schedule: 'Кесте', nav_forecast: 'Болжам',
@@ -388,6 +389,7 @@ const T: Record<Lang, Record<string, string>> = {
     add_btn: 'Қосу', delete_confirm: 'Жою?',
     solver_time: 'Шешу уақыты', solver_status: 'Күйі',
     eff_formula: 'Ауысым балансы = min(1-ауысым, 2-ауысым) / max(1-ауысым, 2-ауысым) × 100%. 100% = екі ауысым арасында тең бөлу.',
+    nav_availability: 'Бос уақыт',
   },
   en: {
     nav_dashboard: 'Dashboard', nav_schedule: 'Schedule', nav_forecast: 'Forecast',
@@ -469,6 +471,7 @@ const T: Record<Lang, Record<string, string>> = {
     add_btn: 'Add', delete_confirm: 'Delete?',
     solver_time: 'Solve Time', solver_status: 'Status',
     eff_formula: 'Shift Balance = min(Shift1, Shift2) / max(Shift1, Shift2) × 100%. Shows how evenly classes are distributed between shifts. 100% = perfect balance.',
+    nav_availability: 'Availability',
   }
 }
 
@@ -481,13 +484,14 @@ interface ScheduleItem {
   course: number; language: string; semester?: number;
 }
 interface Teacher { id: number; full_name: string; max_hours_per_week: number; }
+interface Room { id: number; name: string; capacity: number; room_type: string; is_active: boolean; }
 interface Subject {
   id: number; name: string; credits: number;
   lectures_per_week: number; practices_per_week: number;
   course: number; semester: number; teachers: Teacher[];
 }
 type Theme = 'dark' | 'light' | 'midnight' | 'forest'
-type Tab = 'dashboard' | 'schedule' | 'forecast' | 'advisor' | 'analytics' | 'about'
+type Tab = 'dashboard' | 'schedule' | 'forecast' | 'advisor' | 'analytics' | 'about' | 'availability'
 
 const DAYS_RU = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота"]
 const DAYS_KZ = ["Дүйсенбі","Сейсенбі","Сәрсенбі","Бейсенбі","Жұма","Сенбі"]
@@ -715,6 +719,9 @@ export default function App(){
   const [showEffInfo,setShowEffInfo]=useState(false)
 
   const [filterGroup,setFilterGroup]=useState('all')
+  // Availability checker
+  const [avCheckDay,setAvCheckDay]=useState(DAYS_RU[0])
+  const [avCheckSlot,setAvCheckSlot]=useState('all')
   const [filterTeacher,setFilterTeacher]=useState('all')
   const [filterRoom,setFilterRoom]=useState('all')
   const [filterShift,setFilterShift]=useState('all')
@@ -722,12 +729,20 @@ export default function App(){
   const [filterSemester,setFilterSemester]=useState('all')
 
   const [subjects,setSubjects]=useState<Subject[]>([])
+  const [dbRooms,setDbRooms]=useState<Room[]>([])
+  const [showRoomModal,setShowRoomModal]=useState(false)
+  const [editRoom,setEditRoom]=useState<Room|null>(null)
+  const [rName,setRName]=useState('')
+  const [rCapacity,setRCapacity]=useState(30)
+  const [rType,setRType]=useState('PRACTICE')
+  const [rActive,setRActive]=useState(true)
   const [teachers,setTeachers]=useState<Teacher[]>([])
   const [subjectSearch,setSubjectSearch]=useState('')
   const [subjectCourseF,setSubjectCourseF]=useState('all')
   const [subjectSemF,setSubjectSemF]=useState('all')
   const [showSubjModal,setShowSubjModal]=useState(false)
   const [showTModal,setShowTModal]=useState(false)
+  const [editTeacher,setEditTeacher]=useState<Teacher|null>(null)
   const [editSubj,setEditSubj]=useState<Subject|null>(null)
   const [fName,setFName]=useState('')
   const [fCourse,setFCourse]=useState(1)
@@ -748,11 +763,27 @@ export default function App(){
   },[theme])
 
   useEffect(()=>{
-    if(['advisor','analytics','dashboard','forecast'].includes(tab)){fetchSubjects();fetchTeachers()}
+    if(['advisor','analytics','dashboard','forecast'].includes(tab)){fetchSubjects();fetchTeachers();fetchRooms()}
   },[tab])
 
   const fetchSubjects=async()=>{try{const r=await axios.get<Subject[]>(`${BASE}/subjects/`);setSubjects(r.data)}catch{}}
   const fetchTeachers=async()=>{try{const r=await axios.get<Teacher[]>(`${BASE}/teachers/`);setTeachers(r.data)}catch{}}
+  const fetchRooms=async()=>{try{const r=await axios.get<Room[]>(`${BASE}/rooms/`);setDbRooms(r.data)}catch{}}
+  const saveRoom=async()=>{
+    if(!rName.trim())return
+    try{
+      if(editRoom){
+        await axios.put(`${BASE}/rooms/${editRoom.id}`,{name:rName,capacity:rCapacity,room_type:rType,is_active:rActive})
+      } else {
+        await axios.post(`${BASE}/rooms/`,{name:rName,capacity:rCapacity,room_type:rType,is_active:rActive})
+      }
+      setShowRoomModal(false);fetchRooms()
+    }catch{alert('Ошибка')}
+  }
+  const openEditRoom=(r:Room)=>{setEditRoom(r);setRName(r.name);setRCapacity(r.capacity);setRType(r.room_type);setRActive(r.is_active);setShowRoomModal(true)}
+  const openNewRoom=()=>{setEditRoom(null);setRName('');setRCapacity(30);setRType('PRACTICE');setRActive(true);setShowRoomModal(true)}
+  const toggleRoomActive=async(id:number)=>{try{await axios.patch(`${BASE}/rooms/${id}/toggle-active`);fetchRooms()}catch{alert('Ошибка')}}
+  const deleteRoom=async(id:number)=>{if(!confirm(t('delete_confirm')))return;try{await axios.delete(`${BASE}/rooms/${id}`);fetchRooms()}catch{}}
 
   const handleGenerate=async(sem:1|2|null=null)=>{
     setLoading(true);const t0=Date.now()
@@ -776,9 +807,17 @@ export default function App(){
     try{await axios.post(`${BASE}/subjects/`,{name:fName,credits:fCredits,lectures_per_week:fLec,practices_per_week:fPrac,course:fCourse,semester:fSem,teacher_ids:fTIds});setShowSubjModal(false);fetchSubjects()}catch{alert('Ошибка')}
   }
   const delSubj=async(id:number)=>{if(!confirm(t('delete_confirm')))return;try{await axios.delete(`${BASE}/subjects/${id}`);fetchSubjects()}catch{}}
+  
   const saveT=async()=>{
     if(!tName.trim())return
-    try{await axios.post(`${BASE}/teachers/`,{full_name:tName,max_hours_per_week:tHours});setShowTModal(false);fetchTeachers()}catch{}
+    try{
+      if(editTeacher){
+        await axios.put(`${BASE}/teachers/${editTeacher.id}`,{full_name:tName,max_hours_per_week:tHours})
+      } else {
+        await axios.post(`${BASE}/teachers/`,{full_name:tName,max_hours_per_week:tHours})
+      }
+      setShowTModal(false);setEditTeacher(null);fetchTeachers()
+    }catch{alert('Ошибка')}
   }
 
   const groups=useMemo(()=>[...new Set(schedule.map(i=>i.group))].sort(),[schedule])
@@ -889,13 +928,14 @@ export default function App(){
   }
 
   const themeColors={dark:'linear-gradient(135deg,#6c63ff,#13131b)',light:'linear-gradient(135deg,#5b4de8,#f4f5ff)',midnight:'linear-gradient(135deg,#22d3ee,#05080f)',forest:'linear-gradient(135deg,#4ade80,#07100a)'}
-  const tabTitles:Record<Tab,string>={dashboard:t('nav_dashboard'),schedule:t('nav_schedule'),forecast:t('nav_forecast'),advisor:t('nav_advisor'),analytics:t('nav_analytics'),about:t('nav_about')}
+  const tabTitles:Record<Tab,string>={dashboard:t('nav_dashboard'),schedule:t('nav_schedule'),forecast:t('nav_forecast'),advisor:t('nav_advisor'),analytics:t('nav_analytics'),availability:t('nav_availability'),about:t('nav_about')}
   const navItems=[
     {id:'dashboard'as Tab,icon:'⬡',lk:'nav_dashboard'},
     {id:'schedule'as Tab,icon:'📅',lk:'nav_schedule'},
     {id:'forecast'as Tab,icon:'🔥',lk:'nav_forecast'},
     {id:'advisor'as Tab,icon:'⚙️',lk:'nav_advisor'},
     {id:'analytics'as Tab,icon:'📊',lk:'nav_analytics'},
+    {id:'availability'as Tab,icon:'🔍',lk:'nav_availability'},
     {id:'about'as Tab,icon:'ℹ️',lk:'nav_about'},
   ]
 
@@ -1206,7 +1246,13 @@ export default function App(){
                         <div style={{overflowX:'auto'}}>
                           {[{label:`☀️ ${t('shift1_full')}`,slots:SHIFT1,cls:'s1'},{label:`🌆 ${t('shift2_full')}`,slots:SHIFT2,cls:'s2'}].map(shift=>(
                             <div key={shift.cls} style={{marginBottom:22}}>
-                              <div className={`shift-hdr ${shift.cls}`}>{shift.label}</div>
+                              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+                          <div className={`shift-hdr ${shift.cls}`} style={{marginBottom:0}}>{shift.label}</div>
+                          {shift.cls==='s1'&&<div style={{display:'flex',gap:14,fontSize:11,color:'var(--text2)'}}>
+                            <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:12,height:12,borderRadius:3,background:'var(--lec)',display:'inline-block'}}/>{lang==='en'?'Lecture':lang==='kz'?'Дәріс':'Лекция'}</span>
+                            <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:12,height:12,borderRadius:3,background:'var(--prac)',display:'inline-block'}}/>{lang==='en'?'Practice':lang==='kz'?'Тәжірибе':'Практика'}</span>
+                          </div>}
+                        </div>
                               <table className="gtable">
                                 <thead><tr>
                                   <th className="gtime"/>
@@ -1437,16 +1483,31 @@ export default function App(){
                   <div className="acard">
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
                       <div style={{fontSize:14,fontWeight:800}}>👨‍🏫 {t('staff')}</div>
-                      <button className="btn btn-primary btn-sm" onClick={()=>{setTName('');setTHours(20);setShowTModal(true)}}>+</button>
+                      <button className="btn btn-primary btn-sm" onClick={()=>{setEditTeacher(null);setTName('');setTHours(20);setShowTModal(true)}}>+</button>
                     </div>
                     <div style={{maxHeight:300,overflowY:'auto',display:'flex',flexDirection:'column',gap:7}}>
                       {teachers.map(t2=>(
-                        <div key={t2.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:10}}>
+                        <div key={t2.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:10,transition:'border-color .2s'}}
+                          onMouseEnter={e=>(e.currentTarget.style.borderColor='var(--accent)55')}
+                          onMouseLeave={e=>(e.currentTarget.style.borderColor='var(--border)')}>
                           <div style={{width:34,height:34,borderRadius:9,background:'var(--accent)20',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,flexShrink:0}}>👨‍🏫</div>
                           <div style={{flex:1,minWidth:0}}>
                             <div style={{fontWeight:700,fontSize:12.5,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t2.full_name}</div>
-                            <div style={{fontSize:11,color:'var(--text2)',marginTop:2}}>⏱ {t('max_hours').split('.')[0]}: {t2.max_hours_per_week}ч</div>
+                            <div style={{fontSize:11,color:'var(--text2)',marginTop:2}}>
+                              ⏱ {lang==='en'?'Max':lang==='kz'?'Макс.':'Макс.'}: {t2.max_hours_per_week}ч/нед
+                            </div>
+                            {(() => {
+                              const teacherSubjects = subjects.filter(s=>s.teachers.some(tt=>tt.id===t2.id))
+                              return teacherSubjects.length>0&&(
+                                <div style={{fontSize:10,color:'var(--accent3)',marginTop:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                  📚 {teacherSubjects.map(s=>s.name).join(', ')}
+                                </div>
+                              )
+                            })()}
                           </div>
+                          <button className="btn btn-secondary btn-sm"
+                            onClick={()=>{setEditTeacher(t2);setTName(t2.full_name);setTHours(t2.max_hours_per_week);setShowTModal(true)}}
+                            title={lang==='en'?'Edit':lang==='kz'?'Өңдеу':'Изменить'}>✏️</button>
                         </div>
                       ))}
                     </div>
@@ -1465,6 +1526,48 @@ export default function App(){
                         <span style={{fontWeight:800,fontFamily:'DM Mono,monospace',fontSize:14}}>{row.val}</span>
                       </div>
                     ))}
+                  </div>
+
+                  {/* УПРАВЛЕНИЕ АУДИТОРИЯМИ */}
+                  <div className="acard">
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                      <div style={{fontSize:14,fontWeight:800}}>🏢 {lang==='en'?'Classrooms':lang==='kz'?'Аудиториялар':'Аудитории'}</div>
+                      <button className="btn btn-primary btn-sm" onClick={()=>openNewRoom()}>+</button>
+                    </div>
+                    <div style={{maxHeight:320,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
+                      {dbRooms.map(r=>{
+                        const typeColor = r.room_type==='LECTURE_HALL'?'var(--accent)':r.room_type==='PC_LAB'?'var(--info)':'var(--prac)'
+                        const typeLabel = r.room_type==='LECTURE_HALL'?(lang==='en'?'Lecture Hall':lang==='kz'?'Дәрісхана':'Лекц. зал'):
+                                          r.room_type==='PC_LAB'?(lang==='en'?'PC Lab':lang==='kz'?'Комп. класс':'Комп. класс'):
+                                          (lang==='en'?'Practice':'Практика')
+                        return(
+                          <div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:9}}>
+                            <div style={{width:32,height:32,borderRadius:8,background:r.is_active?typeColor+'22':'var(--danger)15',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,flexShrink:0,opacity:r.is_active?1:0.7}}>
+                            {r.is_active?'🚪':'🔒'}
+                          </div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontWeight:700,fontSize:13,display:'flex',alignItems:'center',gap:6}}>
+                                {r.name}
+                                {!r.is_active&&<span style={{fontSize:10,fontWeight:700,color:'var(--danger)',background:'var(--danger)15',padding:'1px 6px',borderRadius:20}}>
+                                  {lang==='en'?'CLOSED':lang==='kz'?'ЖАБЫҚ':'ЗАКРЫТА'}
+                                </span>}
+                              </div>
+                              <div style={{fontSize:11,color:'var(--text2)',marginTop:2,display:'flex',gap:8}}>
+                                <span style={{color:typeColor,fontWeight:600}}>{typeLabel}</span>
+                                <span>👥 {r.capacity} {lang==='en'?'seats':lang==='kz'?'орын':'мест'}</span>
+                              </div>
+                            </div>
+                            <button className="btn btn-secondary btn-sm" onClick={()=>openEditRoom(r)} title={lang==='en'?'Edit':lang==='kz'?'Өңдеу':'Изменить'}>✏️</button>
+                          <button className={`btn btn-sm ${r.is_active?'btn-secondary':'btn-success'}`}
+                            onClick={()=>toggleRoomActive(r.id)}
+                            title={r.is_active?(lang==='en'?'Close room':lang==='kz'?'Жабу':'Закрыть'):(lang==='en'?'Open room':lang==='kz'?'Ашу':'Открыть')}>
+                            {r.is_active?'🔒':'🔓'}
+                          </button>
+                          <button className="btn btn-danger btn-sm" onClick={()=>deleteRoom(r.id)}>🗑️</button>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1587,6 +1690,235 @@ export default function App(){
                   </>
                 )}
               </>
+            )}
+
+            {/* ===== AVAILABILITY CHECKER ===== */}
+            {tab==='availability'&&(
+              <div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+
+                  {/* ROOM AVAILABILITY */}
+                  <div className="acard">
+                    <div className="acard-title">🏢 {lang==='en'?'Classroom Availability':lang==='kz'?'Аудиториялар бостығы':'Свободные аудитории'}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:14}}>
+                      {lang==='en'?'Check which rooms are free on a specific day and time':
+                       lang==='kz'?'Белгілі бір күні мен уақытта қай аудиториялар бос екенін тексеріңіз':
+                       'Проверьте какие аудитории свободны в конкретный день и время'}
+                    </div>
+                    <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+                      <Sel label={lang==='en'?'DAY':lang==='kz'?'КҮН':'ДЕНЬ'}
+                        value={avCheckDay} onChange={setAvCheckDay}
+                        options={DAYS_RU.map((d,i)=>({value:d,label:DAYS[i]}))} minW="150px"/>
+                      <Sel label={lang==='en'?'TIME':lang==='kz'?'УАҚЫТ':'ВРЕМЯ'}
+                        value={avCheckSlot} onChange={setAvCheckSlot}
+                        options={[{value:'all',label:lang==='en'?'All slots':lang==='kz'?'Барлық уақыт':'Все слоты'},...[...SHIFT1,...SHIFT2].map(s=>({value:s,label:s}))]}
+                        minW="160px"/>
+                    </div>
+                    {schedule.length===0?(
+                      <div style={{fontSize:13,color:'var(--text2)',textAlign:'center',padding:'30px 0'}}>
+                        {lang==='en'?'Generate schedule first':lang==='kz'?'Алдымен кесте жасаңыз':'Сначала сгенерируйте расписание'}
+                      </div>
+                    ):(()=>{
+                      const checkSlots = avCheckSlot==='all'?[...SHIFT1,...SHIFT2]:[avCheckSlot]
+                      return(
+                        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                          {checkSlots.map(slot=>{
+                            const occupied = new Set(schedule.filter(s=>s.day===avCheckDay&&s.time===slot).map(s=>s.room))
+                            const allRooms = rooms
+                            const freeRooms = allRooms.filter(r=>!occupied.has(r))
+                            return(
+                              <div key={slot} style={{background:'var(--bg3)',borderRadius:9,padding:'10px 14px',border:'1px solid var(--border)'}}>
+                                <div style={{fontFamily:'DM Mono,monospace',fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:8}}>{slot}</div>
+                                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                                  {freeRooms.length===0?(
+                                    <span style={{fontSize:11,color:'var(--danger)'}}>⚠️ {lang==='en'?'All rooms occupied':lang==='kz'?'Барлық аудиториялар бос':' Все аудитории заняты'}</span>
+                                  ):freeRooms.map(r=>(
+                                    <span key={r} style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,background:'var(--success)18',color:'var(--success)',border:'1px solid var(--success)33'}}>
+                                      🚪 {r}
+                                    </span>
+                                  ))}
+                                </div>
+                                {freeRooms.length>0&&(
+                                  <div style={{marginTop:6,fontSize:10,color:'var(--text2)'}}>
+                                    ✅ {freeRooms.length} {lang==='en'?'rooms available':lang==='kz'?'аудитория бос':'аудиторий свободно'}
+                                    {' | '}⛔ {allRooms.length-freeRooms.length} {lang==='en'?'occupied':lang==='kz'?'бос емес':'занято'}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+                  </div>
+
+                  {/* TEACHER AVAILABILITY */}
+                  <div className="acard">
+                    <div className="acard-title">👨‍🏫 {lang==='en'?'Teacher Availability':lang==='kz'?'Оқытушылар бостығы':'Свободные преподаватели'}</div>
+                    <div style={{fontSize:12,color:'var(--text2)',marginBottom:14}}>
+                      {lang==='en'?'Check which teachers are free on a specific day and time':
+                       lang==='kz'?'Белгілі бір күні мен уақытта қай оқытушылар бос екенін тексеріңіз':
+                       'Проверьте какие преподаватели свободны в конкретный день и время'}
+                    </div>
+                    <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap'}}>
+                      <Sel label={lang==='en'?'DAY':lang==='kz'?'КҮН':'ДЕНЬ'}
+                        value={avCheckDay} onChange={setAvCheckDay}
+                        options={DAYS_RU.map((d,i)=>({value:d,label:DAYS[i]}))} minW="150px"/>
+                      <Sel label={lang==='en'?'TIME':lang==='kz'?'УАҚЫТ':'ВРЕМЯ'}
+                        value={avCheckSlot} onChange={setAvCheckSlot}
+                        options={[{value:'all',label:lang==='en'?'All slots':lang==='kz'?'Барлық уақыт':'Все слоты'},...[...SHIFT1,...SHIFT2].map(s=>({value:s,label:s}))]}
+                        minW="160px"/>
+                    </div>
+                    {schedule.length===0?(
+                      <div style={{fontSize:13,color:'var(--text2)',textAlign:'center',padding:'30px 0'}}>
+                        {lang==='en'?'Generate schedule first':lang==='kz'?'Алдымен кесте жасаңыз':'Сначала сгенерируйте расписание'}
+                      </div>
+                    ):(()=>{
+                      const checkSlots = avCheckSlot==='all'?[...SHIFT1,...SHIFT2]:[avCheckSlot]
+                      const allTeachers = [...new Set(schedule.map(s=>s.teacher))].sort()
+                      return(
+                        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                          {checkSlots.map(slot=>{
+                            const busy = new Set(schedule.filter(s=>s.day===avCheckDay&&s.time===slot).map(s=>s.teacher))
+                            const freeTeachers = allTeachers.filter(t=>!busy.has(t))
+                            return(
+                              <div key={slot} style={{background:'var(--bg3)',borderRadius:9,padding:'10px 14px',border:'1px solid var(--border)'}}>
+                                <div style={{fontFamily:'DM Mono,monospace',fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:8}}>{slot}</div>
+                                {freeTeachers.length===0?(
+                                  <span style={{fontSize:11,color:'var(--danger)'}}>⚠️ {lang==='en'?'All teachers busy':lang==='kz'?'Барлық оқытушылар бос':' Все преподаватели заняты'}</span>
+                                ):(
+                                  <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                                    {freeTeachers.map(t=>(
+                                      <div key={t} style={{fontSize:11,fontWeight:600,padding:'4px 10px',borderRadius:7,background:'var(--success)12',color:'var(--success)',border:'1px solid var(--success)22'}}>
+                                        ✅ {t}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {freeTeachers.length>0&&(
+                                  <div style={{marginTop:6,fontSize:10,color:'var(--text2)'}}>
+                                    ✅ {freeTeachers.length} {lang==='en'?'free':lang==='kz'?'бос':'свободно'}
+                                    {' | '}⛔ {allTeachers.length-freeTeachers.length} {lang==='en'?'busy':lang==='kz'?'бос емес':'заняты'}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+                  </div>
+                </div>
+
+                {/* WEEKLY ROOM OCCUPANCY TABLE */}
+                {schedule.length>0&&(
+                  <div className="acard" style={{marginBottom:16}}>
+                    <div className="acard-title">📅 {lang==='en'?'Weekly Room Occupancy (% per day)':lang==='kz'?'Аптасына аудитория жүктемесі (күн бойынша %)':'Занятость аудиторий по дням недели (%)'}</div>
+                    <div style={{overflowX:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'separate',borderSpacing:3,fontSize:12}}>
+                        <thead>
+                          <tr>
+                            <th style={{textAlign:'left',padding:'6px 12px',color:'var(--text2)',fontWeight:700,fontSize:11,whiteSpace:'nowrap'}}>{lang==='en'?'Room':lang==='kz'?'Аудитория':'Аудитория'}</th>
+                            {DAYS.map(d=><th key={d} style={{textAlign:'center',padding:'6px 8px',color:'var(--text2)',fontWeight:700,fontSize:11,whiteSpace:'nowrap'}}>{d.slice(0,lang==='kz'?4:3)}</th>)}
+                            <th style={{textAlign:'center',padding:'6px 8px',color:'var(--text2)',fontWeight:700,fontSize:11}}>{lang==='en'?'Avg':lang==='kz'?'Орт.':'Ср.'}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rooms.map(room=>{
+                            const dayLoads = DAYS_RU.map(d=>{
+                              const occupied = new Set(schedule.filter(s=>s.room===room&&s.day===d).map(s=>s.time)).size
+                              return Math.round(occupied/12*100)
+                            })
+                            const avg = Math.round(dayLoads.reduce((a,b)=>a+b,0)/dayLoads.length)
+                            return(
+                              <tr key={room}>
+                                <td style={{padding:'5px 12px',fontWeight:600,fontSize:12,whiteSpace:'nowrap'}}>{room}</td>
+                                {dayLoads.map((pct,i)=>{
+                                  const bg = pct===0?'var(--bg3)':
+                                             pct<40?`rgba(46,204,113,${0.2+pct/100*0.5})`:
+                                             pct<75?`rgba(243,156,18,${0.2+pct/100*0.5})`:
+                                             `rgba(231,76,60,${0.2+pct/100*0.5})`
+                                  return(
+                                    <td key={i} style={{textAlign:'center',padding:'5px 4px',background:bg,borderRadius:5,fontWeight:pct>0?700:400,
+                                      color:pct>60?'#fff':pct>0?'var(--text)':'var(--text2)',fontSize:11,minWidth:48}}>
+                                      {pct>0?`${pct}%`:'—'}
+                                    </td>
+                                  )
+                                })}
+                                <td style={{textAlign:'center',padding:'5px 8px',fontWeight:700,fontSize:12,
+                                  color:avg>70?'var(--danger)':avg>40?'var(--warn)':'var(--success)'}}>
+                                  {avg}%
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{marginTop:10,display:'flex',gap:14,fontSize:11,color:'var(--text2)'}}>
+                      <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:14,height:10,background:'rgba(46,204,113,0.5)',borderRadius:2,display:'inline-block'}}/>{lang==='en'?'Low (<40%)':lang==='kz'?'Аз (<40%)':'Мало (<40%)'}</span>
+                      <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:14,height:10,background:'rgba(243,156,18,0.5)',borderRadius:2,display:'inline-block'}}/>{lang==='en'?'Medium (40-75%)':lang==='kz'?'Орташа (40-75%)':'Средне (40-75%)'}</span>
+                      <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:14,height:10,background:'rgba(231,76,60,0.5)',borderRadius:2,display:'inline-block'}}/>{lang==='en'?'High (>75%)':lang==='kz'?'Жоғары (>75%)':'Высокая (>75%)'}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* TEACHER WEEKLY LOAD TABLE */}
+                {schedule.length>0&&analytics&&(
+                  <div className="acard">
+                    <div className="acard-title">👨‍🏫 {lang==='en'?'Teacher Load by Day':lang==='kz'?'Күн бойынша оқытушы жүктемесі':'Нагрузка преподавателей по дням'}</div>
+                    <div style={{overflowX:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'separate',borderSpacing:3,fontSize:12}}>
+                        <thead>
+                          <tr>
+                            <th style={{textAlign:'left',padding:'6px 12px',color:'var(--text2)',fontWeight:700,fontSize:11,minWidth:140}}>{lang==='en'?'Teacher':lang==='kz'?'Оқытушы':'Преподаватель'}</th>
+                            {DAYS.map(d=><th key={d} style={{textAlign:'center',padding:'6px 8px',color:'var(--text2)',fontWeight:700,fontSize:11,whiteSpace:'nowrap'}}>{d.slice(0,lang==='kz'?4:3)}</th>)}
+                            <th style={{textAlign:'center',padding:'6px 8px',color:'var(--text2)',fontWeight:700,fontSize:11}}>{lang==='en'?'Total':lang==='kz'?'Барлығы':'Итого'}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(analytics.teacherCounts).sort(([,a],[,b])=>b-a).map(([teacher,total])=>{
+                            const dayLoads = DAYS_RU.map(d=>
+                              new Set(schedule.filter(s=>s.teacher===teacher&&s.day===d).map(s=>s.time)).size
+                            )
+                            const tObj = teachers.find(t=>t.full_name===teacher)
+                            const isOverloaded = total>(tObj?.max_hours_per_week||20)
+                            return(
+                              <tr key={teacher}>
+                                <td style={{padding:'5px 12px',fontWeight:600,fontSize:11,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:isOverloaded?'var(--danger)':'var(--text)'}}>
+                                  {teacher}{isOverloaded?' ⚠️':''}
+                                </td>
+                                {dayLoads.map((cnt,i)=>{
+                                  const pct = cnt/6
+                                  const bg = cnt===0?'var(--bg3)':
+                                             cnt<=2?`rgba(46,204,113,${0.2+pct*0.6})`:
+                                             cnt<=4?`rgba(243,156,18,${0.2+pct*0.6})`:
+                                             `rgba(231,76,60,${0.2+pct*0.6})`
+                                  return(
+                                    <td key={i} style={{textAlign:'center',padding:'5px 4px',background:bg,borderRadius:5,
+                                      fontWeight:cnt>0?700:400,color:cnt>=4?'#fff':cnt>0?'var(--text)':'var(--text2)',fontSize:12,minWidth:48}}>
+                                      {cnt>0?`${cnt}п`:'—'}
+                                    </td>
+                                  )
+                                })}
+                                <td style={{textAlign:'center',padding:'5px 8px',fontWeight:800,fontSize:13,
+                                  color:isOverloaded?'var(--danger)':'var(--text)'}}>
+                                  {total}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{marginTop:10,fontSize:11,color:'var(--text2)'}}>
+                      {lang==='en'?'п = pairs (classes). ⚠️ = overloaded (exceeds weekly limit)':
+                       lang==='kz'?'п = сабақтар. ⚠️ = шамадан тыс жүктелген':
+                       'п = пары (занятия). ⚠️ = перегружен (превышает недельную норму)'}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* ===== ABOUT ===== */}
@@ -1734,21 +2066,98 @@ export default function App(){
             </div>
           </div>
         )}
+        
         {showTModal&&(
           <div className="modal-ov" onClick={e=>{if(e.target===e.currentTarget)setShowTModal(false)}}>
             <div className="modal" style={{maxWidth:380}}>
-              <div className="modal-title">{t('new_teacher')}</div>
+              <div className="modal-title">{editTeacher?(lang==='en'?'Edit Teacher':lang==='kz'?'Оқытушыны өңдеу':'Изменить преподавателя'):t('new_teacher')}</div>
               <div className="form-grid" style={{gridTemplateColumns:'1fr'}}>
                 <div className="ff"><label className="fl">{t('fio_lbl')}</label><input className="fi" value={tName} onChange={e=>setTName(e.target.value)} placeholder="..."/></div>
                 <div className="ff"><label className="fl">{t('max_hours')}</label><input type="number" className="fi" min={1} max={40} value={tHours} onChange={e=>setTHours(Number(e.target.value))}/></div>
+                
+                {editTeacher && (
+                  <div className="ff" style={{marginTop: 8}}>
+                    <label className="fl">
+                      {lang==='en'?'Assigned Subjects':lang==='kz'?'Бекітілген пәндер':'Прикрепленные предметы'}
+                    </label>
+                    <div style={{background: 'var(--bg3)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border)', maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                      {(() => {
+                        const teacherSubjects = subjects.filter(s => s.teachers.some(tt => tt.id === editTeacher.id));
+                        
+                        if (teacherSubjects.length === 0) {
+                          return <span style={{fontSize: 12, color: 'var(--text2)'}}>
+                            {lang==='en'?'No subjects assigned':lang==='kz'?'Пәндер жоқ':'Нет предметов'}
+                          </span>;
+                        }
+                        
+                        return teacherSubjects.map(s => (
+                          <div key={s.id} style={{fontSize: 12, color: 'var(--text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)44', paddingBottom: '4px'}}>
+                            <span style={{fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px'}} title={s.name}>
+                              📚 {s.name}
+                            </span>
+                            <span style={{fontSize: 11, color: 'var(--text2)', flexShrink: 0}}>
+                              {s.course} {t('course_lbl')}, {s.semester} {t('sem_lbl')}
+                            </span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
+              
               <div style={{display:'flex',gap:9,justifyContent:'flex-end',marginTop:18}}>
                 <button className="btn btn-secondary" onClick={()=>setShowTModal(false)}>{t('cancel')}</button>
-                <button className="btn btn-primary" onClick={saveT}>{t('add_btn')}</button>
+                <button className="btn btn-primary" onClick={saveT}>{editTeacher?t('save'):t('add_btn')}</button>
               </div>
             </div>
           </div>
         )}
+        
+        {/* ROOM MODAL */}
+        {showRoomModal&&(
+          <div className="modal-ov" onClick={e=>{if(e.target===e.currentTarget)setShowRoomModal(false)}}>
+            <div className="modal" style={{maxWidth:400}}>
+              <div className="modal-title">🏢 {editRoom?(lang==='en'?'Edit Classroom':lang==='kz'?'Аудиторияны өңдеу':'Редактировать аудиторию'):(lang==='en'?'Add Classroom':lang==='kz'?'Аудитория қосу':'Добавить аудиторию')}</div>
+              <div className="form-grid" style={{gridTemplateColumns:'1fr'}}>
+                <div className="ff">
+                  <label className="fl">{lang==='en'?'Room Number':lang==='kz'?'Аудитория нөмірі':'Номер аудитории'}</label>
+                  <input className="fi" value={rName} onChange={e=>setRName(e.target.value)} placeholder="например: 312"/>
+                </div>
+                <div className="ff">
+                  <label className="fl">{lang==='en'?'Capacity (seats)':lang==='kz'?'Сыйымдылық (орын)':'Вместимость (мест)'}</label>
+                  <input type="number" className="fi" min={10} max={300} value={rCapacity} onChange={e=>setRCapacity(Number(e.target.value))}/>
+                </div>
+                <div className="ff">
+                  <label className="fl">{lang==='en'?'Room Type':lang==='kz'?'Аудитория түрі':'Тип аудитории'}</label>
+                  <select className="fi" value={rType} onChange={e=>setRType(e.target.value)}>
+                    <option value="LECTURE_HALL">{lang==='en'?'Lecture Hall':lang==='kz'?'Дәрісхана':'Лекционный зал'}</option>
+                    <option value="PC_LAB">{lang==='en'?'PC Lab':lang==='kz'?'Компьютерлік класс':'Компьютерный класс'}</option>
+                    <option value="PRACTICE">{lang==='en'?'Practice Room':lang==='kz'?'Тәжірибе бөлмесі':'Кабинет практики'}</option>
+                  </select>
+                </div>
+              </div>
+              <div className="ff" style={{marginTop:4}}>
+                <label className="fl">{lang==='en'?'Status':lang==='kz'?'Күй':'Статус'}</label>
+                <div style={{display:'flex',gap:8}}>
+                  <label style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',borderRadius:8,border:`1.5px solid ${rActive?'var(--success)':'var(--border)'}`,background:rActive?'var(--success)12':'var(--bg3)',cursor:'pointer',flex:1,fontSize:13}}>
+                    <input type="radio" checked={rActive} onChange={()=>setRActive(true)} style={{accentColor:'var(--success)'}}/>
+                    ✅ {lang==='en'?'Active (Open)':lang==='kz'?'Белсенді (Ашық)':'Активна (Открыта)'}
+                  </label>
+                  <label style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',borderRadius:8,border:`1.5px solid ${!rActive?'var(--danger)':'var(--border)'}`,background:!rActive?'var(--danger)12':'var(--bg3)',cursor:'pointer',flex:1,fontSize:13}}>
+                    <input type="radio" checked={!rActive} onChange={()=>setRActive(false)} style={{accentColor:'var(--danger)'}}/>
+                    🔒 {lang==='en'?'Closed (Repair)':lang==='kz'?'Жабық (Жөндеу)':'Закрыта (Ремонт)'}
+                  </label>
+                </div>
+              </div>
+              <div style={{display:'flex',gap:9,justifyContent:'flex-end',marginTop:18}}>
+                <button className="btn btn-secondary" onClick={()=>setShowRoomModal(false)}>{t('cancel')}</button>
+                <button className="btn btn-primary" onClick={saveRoom}>💾 {editRoom?t('save'):t('add_btn')}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {sidebarOpen&&<div style={{position:'fixed',inset:0,background:'#00000055',zIndex:99}} onClick={()=>setSidebarOpen(false)}/>}
       </div>
     </>

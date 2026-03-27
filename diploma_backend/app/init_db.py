@@ -216,10 +216,10 @@ def init_db():
                 course=3, semester=5, credits=4,
                 lectures_per_week=2, practices_per_week=1,
                 teachers=[t_smagulov, t_nurmagambetov]),
-        Subject(name="Физическая культура 5",
-                course=3, semester=5, credits=2,
-                lectures_per_week=0, practices_per_week=2,
-                teachers=[t_sport]),
+        Subject(name="Анализ данных и визуализация",
+                course=3, semester=5, credits=5,
+                lectures_per_week=2, practices_per_week=1,
+                teachers=[t_nurmagambetov, t_dzhaksybekov]),
 
         # =========================================================
         # 3 КУРС — СЕМЕСТР 6 (весна)
@@ -244,10 +244,10 @@ def init_db():
                 course=3, semester=6, credits=4,
                 lectures_per_week=1, practices_per_week=1,
                 teachers=[t_ivanov, t_smagulov]),
-        Subject(name="Физическая культура 6",
-                course=3, semester=6, credits=2,
-                lectures_per_week=0, practices_per_week=2,
-                teachers=[t_sport]),
+        Subject(name="Тестирование программного обеспечения",
+                course=3, semester=6, credits=5,
+                lectures_per_week=2, practices_per_week=1,
+                teachers=[t_omarov, t_bekova]),
 
         # =========================================================
         # 4 КУРС — СЕМЕСТР 7 (осень)

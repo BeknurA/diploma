@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional
+from pydantic import BaseModel
 from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -146,6 +147,18 @@ def create_or_update_teacher(teacher: schemas.TeacherCreate, db: Session = Depen
     return new_teacher
 
 
+@app.put("/teachers/{teacher_id}", response_model=schemas.TeacherResponse)
+def update_teacher(teacher_id: int, teacher: schemas.TeacherCreate, db: Session = Depends(get_db)):
+    db_teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
+    if not db_teacher:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    db_teacher.full_name = teacher.full_name
+    db_teacher.max_hours_per_week = teacher.max_hours_per_week
+    db.commit()
+    db.refresh(db_teacher)
+    return db_teacher
+
 @app.delete("/teachers/{teacher_id}")
 def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
     teacher = db.query(models.Teacher).filter(models.Teacher.id == teacher_id).first()
@@ -153,5 +166,105 @@ def delete_teacher(teacher_id: int, db: Session = Depends(get_db)):
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Teacher not found")
     db.delete(teacher)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# --- УПРАВЛЕНИЕ АУДИТОРИЯМИ ---
+class RoomCreate(BaseModel):
+    name: str
+    capacity: int = 30
+    room_type: str = "PRACTICE"
+
+class RoomResponse(BaseModel):
+    id: int
+    name: str
+    capacity: int
+    room_type: str
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+        use_enum_values = True
+
+@app.get("/rooms/", response_model=list[RoomResponse])
+def get_rooms(db: Session = Depends(get_db)):
+    rooms = db.query(models.Room).order_by(models.Room.name).all()
+    # Ensure is_active field exists (backward compat before migration)
+    for r in rooms:
+        if not hasattr(r, 'is_active') or r.is_active is None:
+            r.is_active = True
+    return rooms
+
+@app.post("/rooms/", response_model=RoomResponse)
+def create_room(room: RoomCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.Room).filter(models.Room.name == room.name).first()
+    if existing:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Room already exists")
+    # Convert string to enum
+    room_type_map = {
+        "LECTURE_HALL": models.RoomTypeEnum.LECTURE_HALL,
+        "PC_LAB":       models.RoomTypeEnum.PC_LAB,
+        "PRACTICE":     models.RoomTypeEnum.PRACTICE,
+        # Also accept Russian values directly
+        "Лекционный зал":     models.RoomTypeEnum.LECTURE_HALL,
+        "Компьютерный класс": models.RoomTypeEnum.PC_LAB,
+        "Кабинет практики":   models.RoomTypeEnum.PRACTICE,
+    }
+    room_type_enum = room_type_map.get(room.room_type, models.RoomTypeEnum.PRACTICE)
+    new_room = models.Room(
+        name=room.name,
+        capacity=room.capacity,
+        room_type=room_type_enum
+    )
+    db.add(new_room)
+    db.commit()
+    db.refresh(new_room)
+    return new_room
+
+@app.put("/rooms/{room_id}", response_model=RoomResponse)
+def update_room(room_id: int, room: RoomCreate, db: Session = Depends(get_db)):
+    db_room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if not db_room:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Room not found")
+    room_type_map = {
+        "LECTURE_HALL": models.RoomTypeEnum.LECTURE_HALL,
+        "PC_LAB":       models.RoomTypeEnum.PC_LAB,
+        "PRACTICE":     models.RoomTypeEnum.PRACTICE,
+        "Лекционный зал":     models.RoomTypeEnum.LECTURE_HALL,
+        "Компьютерный класс": models.RoomTypeEnum.PC_LAB,
+        "Кабинет практики":   models.RoomTypeEnum.PRACTICE,
+    }
+    db_room.name = room.name
+    db_room.capacity = room.capacity
+    db_room.room_type = room_type_map.get(room.room_type, models.RoomTypeEnum.PRACTICE)
+    if hasattr(db_room, 'is_active') and hasattr(room, 'is_active'):
+        db_room.is_active = room.is_active
+    db.commit()
+    db.refresh(db_room)
+    return db_room
+
+@app.patch("/rooms/{room_id}/toggle-active")
+def toggle_room_active(room_id: int, db: Session = Depends(get_db)):
+    """Переключить активность аудитории (закрыть/открыть)"""
+    db_room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if not db_room:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Room not found")
+    if hasattr(db_room, 'is_active'):
+        db_room.is_active = not db_room.is_active
+        db.commit()
+        return {"status": "ok", "is_active": db_room.is_active}
+    return {"status": "ok", "is_active": True}
+
+@app.delete("/rooms/{room_id}")
+def delete_room(room_id: int, db: Session = Depends(get_db)):
+    room = db.query(models.Room).filter(models.Room.id == room_id).first()
+    if not room:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Room not found")
+    db.delete(room)
     db.commit()
     return {"status": "deleted"}

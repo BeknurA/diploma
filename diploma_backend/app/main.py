@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel
 from fastapi import FastAPI, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -258,6 +258,122 @@ def toggle_room_active(room_id: int, db: Session = Depends(get_db)):
         db.commit()
         return {"status": "ok", "is_active": db_room.is_active}
     return {"status": "ok", "is_active": True}
+# ============================================================
+# РЕДАКТИРОВАНИЕ РАСПИСАНИЯ — валидация изменений
+# ============================================================
+
+class ScheduleSlotEdit(BaseModel):
+    day: str
+    time: str
+    group: str
+    subject: str
+    teacher: str
+    room: str
+    class_type: str
+    shift: int
+    course: int
+    language: str
+    semester: Optional[int] = None
+    time_index: int = 0
+
+class ScheduleEditRequest(BaseModel):
+    current_schedule: List[ScheduleSlotEdit]
+    target_index: int
+    new_day: str
+    new_time: str
+    new_room: str
+    new_teacher: str
+
+class ConflictInfo(BaseModel):
+    type: str
+    entity: str
+    conflict_with: str
+
+class ScheduleEditResponse(BaseModel):
+    valid: bool
+    conflicts: List[ConflictInfo]
+    warnings: List[str]
+    message: str
+
+@app.post("/schedule/validate-change", response_model=ScheduleEditResponse)
+def validate_schedule_change(req: ScheduleEditRequest):
+    from app.core.scheduler import TIME_SLOTS, SHIFT_1_SLOTS, SHIFT_2_SLOTS, COURSE_TO_SHIFT
+
+    conflicts: List[ConflictInfo] = []
+    warnings: List[str] = []
+    schedule = req.current_schedule
+    idx = req.target_index
+
+    if idx < 0 or idx >= len(schedule):
+        return ScheduleEditResponse(valid=False, conflicts=[], warnings=[], message="Неверный индекс")
+
+    target = schedule[idx]
+    new_day = req.new_day
+    new_time = req.new_time
+    new_room = req.new_room
+    new_teacher = req.new_teacher
+    group = target.group
+    course = target.course
+
+    required_shift = COURSE_TO_SHIFT.get(course, 1)
+    allowed_slots = SHIFT_1_SLOTS if required_shift == 1 else SHIFT_2_SLOTS
+    shift_name = "1 (08:00–14:00)" if required_shift == 1 else "2 (14:00–20:00)"
+
+    if new_time not in allowed_slots:
+        conflicts.append(ConflictInfo(
+            type="shift", entity=new_time,
+            conflict_with=f"Группа {group} ({course} курс) учится в смене {shift_name}. Выбранное время не входит в эту смену."
+        ))
+
+    for i, slot in enumerate(schedule):
+        if i == idx:
+            continue
+        if slot.day != new_day or slot.time != new_time:
+            continue
+        if slot.room == new_room:
+            conflicts.append(ConflictInfo(
+                type="room", entity=new_room,
+                conflict_with=f"В {new_day} {new_time} аудитория занята: {slot.subject} ({slot.group}, {slot.teacher})"
+            ))
+        if slot.teacher == new_teacher:
+            conflicts.append(ConflictInfo(
+                type="teacher", entity=new_teacher,
+                conflict_with=f"В {new_day} {new_time} преподаватель занят: {slot.subject} ({slot.group})"
+            ))
+        if slot.group == group:
+            conflicts.append(ConflictInfo(
+                type="group", entity=group,
+                conflict_with=f"В {new_day} {new_time} группа уже имеет занятие: {slot.subject}"
+            ))
+
+    MAX_PAIRS = 4
+    day_pairs = sum(1 for i, s in enumerate(schedule) if i != idx and s.group == group and s.day == new_day)
+    if day_pairs >= MAX_PAIRS:
+        warnings.append(f"У группы {group} уже {day_pairs} пар(ы) в {new_day}. Рекомендуется не более {MAX_PAIRS}.")
+
+    group_day_slots = sorted([
+        TIME_SLOTS.index(s.time) for i, s in enumerate(schedule)
+        if i != idx and s.group == group and s.day == new_day and s.time in TIME_SLOTS
+    ])
+    new_slot_idx = TIME_SLOTS.index(new_time) if new_time in TIME_SLOTS else -1
+    if new_slot_idx >= 0 and group_day_slots:
+        all_day = sorted(group_day_slots + [new_slot_idx])
+        for k in range(len(all_day) - 1):
+            gap = all_day[k + 1] - all_day[k] - 1
+            if gap > 0:
+                t1 = TIME_SLOTS[all_day[k]]
+                t2 = TIME_SLOTS[all_day[k + 1]]
+                warnings.append(f"Возникнет окно ({gap} слот(а)) между {t1} и {t2} у группы {group}")
+
+    if new_room == "Спортзал" and target.class_type != "Практика":
+        warnings.append("Спортзал обычно используется только для физкультуры.")
+    if new_room != "Спортзал" and "физическая культура" in target.subject.lower():
+        warnings.append("Физкультура обычно проводится в Спортзале.")
+
+    valid = len(conflicts) == 0
+    message = ("Замена допустима — конфликтов не обнаружено" if not warnings else "Замена допустима, но есть предупреждения") if valid else f"Замена невозможна: {len(conflicts)} конфликт(ов)"
+
+    return ScheduleEditResponse(valid=valid, conflicts=conflicts, warnings=warnings, message=message)
 
 @app.delete("/rooms/{room_id}")
 def delete_room(room_id: int, db: Session = Depends(get_db)):

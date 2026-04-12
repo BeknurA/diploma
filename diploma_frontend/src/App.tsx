@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import ScheduleEditModal from './ScheduleEditModal'
 import axios from 'axios'
 import * as XLSX from 'xlsx'
 
@@ -138,6 +139,8 @@ const CSS = `
   .gcell-empty{display:flex;align-items:center;justify-content:center;height:38px;font-size:11px;color:var(--border);font-weight:300}
   .ci{border-radius:3px;padding:4px 6px;margin-bottom:2px;font-size:10.5px;cursor:default;border-left:2px solid}
   .ci:hover{opacity:.85}
+  .ci-edit-btn{display:none}
+  .ci:hover .ci-edit-btn{display:block!important}
   .ci-lec{background:var(--lec)08;border-left-color:var(--lec)}
   .ci-prac{background:var(--prac)08;border-left-color:var(--prac)}
   .ci-s{font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -713,8 +716,52 @@ export default function App(){
  const [selectedGroup,setSelectedGroup]=useState('all')
  const [showEffInfo,setShowEffInfo]=useState(false)
 
+// ── Редактирование расписания ─────────────────────────────
+const [editModalItem, setEditModalItem] = useState<ScheduleItem | null>(null)
+const [editModalIndex, setEditModalIndex] = useState<number>(-1)
+const [editedIndices, setEditedIndices] = useState<Set<number>>(new Set())
+const [originalSchedule, setOriginalSchedule] = useState<ScheduleItem[]>([])
+const [toast, setToast] = useState<{msg: string, type: 'success'|'warn'} | null>(null)
+
+const showToast = (msg: string, type: 'success'|'warn' = 'success') => {
+  setToast({msg, type})
+  setTimeout(() => setToast(null), 3500)
+}
+
+const openEditModal = (item: ScheduleItem, realIdx: number) => {
+  setEditModalItem(item)
+  setEditModalIndex(realIdx)
+}
+
+const handleApplyEdit = (updated: ScheduleItem) => {
+  setSchedule(prev => {
+    const next = [...prev]
+    next[editModalIndex] = updated
+    return next
+  })
+  setEditedIndices(prev => new Set(prev).add(editModalIndex))
+  setEditModalItem(null)
+  setEditModalIndex(-1)
+  showToast(
+    lang === 'en' ? '✓ Class updated successfully'
+    : lang === 'kz' ? '✓ Сабақ сәтті жаңартылды'
+    : '✓ Занятие успешно изменено'
+  )
+}
+
+const resetEdits = () => {
+  setSchedule([...originalSchedule])
+  setEditedIndices(new Set())
+  showToast(
+    lang === 'en' ? 'Schedule reset to original'
+    : lang === 'kz' ? 'Кесте бастапқы күйге қайтарылды'
+    : 'Расписание сброшено к исходному',
+    'warn'
+  )
+}
+// ─────────────────────────────────────────────────────────
+
  const [filterGroup,setFilterGroup]=useState('all')
- // Availability checker
  const [avCheckDay,setAvCheckDay]=useState(DAYS_RU[0])
  const [avCheckSlot,setAvCheckSlot]=useState('all')
  const [filterTeacher,setFilterTeacher]=useState('all')
@@ -749,7 +796,6 @@ export default function App(){
  const [tName,setTName]=useState('')
  const [tHours,setTHours]=useState(20)
 
- // Sync selected day when lang changes
  useEffect(()=>{ setSelectedDay(DAYS[0]) },[lang])
 
  useEffect(()=>{
@@ -785,7 +831,10 @@ export default function App(){
  try{
  const url=sem?`${BASE}/generate-schedule/?semester=${sem}`:`${BASE}/generate-schedule/`
  const res=await axios.post(url)
- setSchedule(res.data.schedule)
+ const newSchedule = res.data.schedule
+ setSchedule(newSchedule)
+ setOriginalSchedule([...newSchedule])
+ setEditedIndices(new Set())
  setLastUpdate(res.data.generated_at)
  setActiveSemester(sem)
  setSolverTime(Date.now()-t0)
@@ -818,6 +867,20 @@ export default function App(){
  const groups=useMemo(()=>[...new Set(schedule.map(i=>i.group))].sort(),[schedule])
  const tNames=useMemo(()=>[...new Set(schedule.map(i=>i.teacher))].sort(),[schedule])
  const rooms=useMemo(()=>[...new Set(schedule.map(i=>i.room))].sort(),[schedule])
+
+ const scheduleIndexMap = useMemo(() => {
+  const m = new Map<string, number>()
+  schedule.forEach((s, i) => {
+    const key = `${s.day}|${s.time}|${s.room}|${s.group}|${s.subject}`
+    if (!m.has(key)) m.set(key, i)
+  })
+  return m
+ }, [schedule])
+
+ const getRealIndex = (item: ScheduleItem) => {
+  const key = `${item.day}|${item.time}|${item.room}|${item.group}|${item.subject}`
+  return scheduleIndexMap.get(key) ?? -1
+ }
 
  const filtered=useMemo(()=>schedule.filter(i=>
  (filterGroup==='all'||i.group===filterGroup)&&
@@ -1204,7 +1267,38 @@ export default function App(){
 
  {schedule.length>0&&(
  <>
- <div className="acard" style={{marginBottom:14}}>
+ {/* ── Панель режима редактирования ──────────────────────── */}
+<div className="acard" style={{marginBottom:14,background:'var(--accent)06',border:'1px solid var(--accent)20'}}>
+  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+    <div style={{display:'flex',alignItems:'center',gap:12}}>
+      <div style={{width:34,height:34,borderRadius:8,background:'var(--accent)20',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,flexShrink:0}}>✏️</div>
+      <div>
+        <div style={{fontSize:13,fontWeight:700,color:'var(--accent3)'}}>
+          {lang==='en'?'Edit Mode':lang==='kz'?'Өңдеу режимі':'Режим редактирования'}
+        </div>
+        <div style={{fontSize:11,color:'var(--text2)',marginTop:2}}>
+          {lang==='en'?'Hover a class → click ED button to edit it'
+          :lang==='kz'?'Сабаққа апарыңыз → ED түймесін басыңыз'
+          :'Наведите на занятие → нажмите кнопку ED для редактирования'}
+        </div>
+      </div>
+      {editedIndices.size > 0 && (
+        <span style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:10,background:'var(--accent)18',color:'var(--accent)',border:'1px solid var(--accent)30',fontFamily:"'JetBrains Mono',monospace"}}>
+          ✏ {lang==='en'?'Edited':lang==='kz'?'Өзгертілді':'Изменено'}: {editedIndices.size}
+        </span>
+      )}
+    </div>
+    {editedIndices.size > 0 && (
+      <button
+        onClick={resetEdits}
+        style={{padding:'6px 14px',borderRadius:6,border:'1px solid var(--warn)30',background:'transparent',color:'var(--warn)',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}
+      >
+        ↺ {lang==='en'?'Reset edits':lang==='kz'?'Болдырмау':'Сбросить правки'}
+      </button>
+    )}
+  </div>
+</div>
+
  <div className="filter-bar">
  <Sel label={t('filter_course')} value={filterCourse} onChange={setFilterCourse} options={COURSE_OPTS} minW="120px"/>
  <Sel label={t('filter_group')} value={filterGroup} onChange={setFilterGroup} options={GROUP_OPTS} minW="148px"/>
@@ -1226,10 +1320,9 @@ export default function App(){
  {filterSemester!=='all'&&filtered.length===0&&<span style={{background:'var(--danger)18',color:'var(--danger)',padding:'2px 9px',borderRadius:20,fontSize:11,fontWeight:700}}>{lang==='en'?'Not in schedule':lang==='kz'?'Кестеде жоқ':'Нет в расписании'}</span>}
  {filterCourse!=='all'&&<span style={{color:'var(--accent3)'}}>Курс: <strong>{filterCourse}</strong></span>}
  </div>
- </div>
 
  {viewMode==='grid'&&(
- <div className="acard" style={{padding:14}}>
+ <div className="acard" style={{padding:14, marginTop:14}}>
  <div style={{overflowX:'auto'}}>
  {[{label:`${t('shift1_full')}`,slots:SHIFT1,cls:'s1'},{label:`${t('shift2_full')}`,slots:SHIFT2,cls:'s2'}].map(shift=>(
  <div key={shift.cls} style={{marginBottom:22}}>
@@ -1257,7 +1350,24 @@ export default function App(){
  {items.map((it,i)=>(
  <div key={i} className={`ci ${it.class_type==='Лекция'?'ci-lec':'ci-prac'}`}
  title={`${it.subject}\n ${it.teacher}\n ${it.room}\n ${it.group}`}>
- <div className="ci-s">{it.subject}</div>
+<div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:3}}>
+  <div className="ci-s" style={{flex:1}}>{it.subject}</div>
+  <button
+    style={{flexShrink:0,background:'var(--accent)20',border:'1px solid var(--accent)40',borderRadius:3,color:'var(--accent3)',fontSize:8,fontWeight:700,cursor:'pointer',padding:'2px 5px',fontFamily:"'JetBrains Mono',monospace",lineHeight:1.4,display:'none'}}
+    className="ci-edit-btn"
+    onClick={e=>{
+      e.stopPropagation()
+      const realIdx = getRealIndex(it)
+      if(realIdx >= 0) openEditModal(it, realIdx)
+    }}
+    title={lang==='en'?'Edit class':lang==='kz'?'Сабақты өңдеу':'Редактировать занятие'}
+  >ED</button>
+</div>
+{(() => { const ri = getRealIndex(it); return ri >= 0 && editedIndices.has(ri) })() && (
+  <div style={{fontSize:8,color:'var(--accent3)',fontWeight:700,marginTop:1}}>
+    ✏ {lang==='en'?'edited':lang==='kz'?'өзгертілді':'изменено'}
+  </div>
+)}
  <div className="ci-m">
  <span className="ci-tag">{it.room}</span>
  <span className="ci-tag">{it.group}</span>
@@ -1278,7 +1388,7 @@ export default function App(){
  )}
 
  {viewMode==='list'&&(
- <div className="acard" style={{padding:0,overflow:'hidden'}}>
+ <div className="acard" style={{padding:0,overflow:'hidden', marginTop:14}}>
  <table className="ltable">
  <thead><tr>
  <th>{lang==='en'?'Day':lang==='kz'?'Күн':'День'}</th>
@@ -1289,8 +1399,9 @@ export default function App(){
  <th>{lang==='en'?'Subject':lang==='kz'?'Пән':'Предмет'}</th>
  <th>{t('filter_teacher')}</th>
  <th>{t('filter_room')}</th>
- <th>{lang==='en'?'Type':lang==='kz'?'Түрі':'Тип'}</th>
- </tr></thead>
+<th>{lang==='en'?'Type':lang==='kz'?'Түрі':'Тип'}</th>
+<th style={{color:'var(--accent3)',fontSize:9}}>EDIT</th>
+</tr></thead>
  <tbody>
  {filtered.map((row,i)=>(
  <tr key={i}>
@@ -1303,7 +1414,16 @@ export default function App(){
  <td style={{color:'var(--text2)',fontSize:11}}>{row.teacher}</td>
  <td>{row.room}</td>
  <td><span className={`tbadge ${row.class_type==='Лекция'?'tlec':'tprac'}`}>{row.class_type==='Лекция'?t('lecture'):t('practice')}</span></td>
- </tr>
+<td>
+  <button
+    style={{padding:'3px 8px',borderRadius:4,border:'1px solid var(--accent)35',background:'var(--accent)15',color:'var(--accent3)',fontSize:10,fontWeight:700,cursor:'pointer',fontFamily:"'JetBrains Mono',monospace"}}
+    onClick={() => {
+      const realIdx = getRealIndex(row)
+      if(realIdx >= 0) openEditModal(row, realIdx)
+    }}
+  >ED</button>
+</td>
+</tr>
  ))}
  </tbody>
  </table>
@@ -1519,37 +1639,73 @@ export default function App(){
  </div>
  <div style={{maxHeight:320,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
  {dbRooms.map(r=>{
- const typeColor = r.room_type==='LECTURE_HALL'?'var(--accent)':r.room_type==='PC_LAB'?'var(--info)':'var(--prac)'
- const typeLabel = r.room_type==='LECTURE_HALL'?(lang==='en'?'Lecture Hall':lang==='kz'?'Дәрісхана':'Лекц. зал'):
- r.room_type==='PC_LAB'?(lang==='en'?'PC Lab':lang==='kz'?'Комп. класс':'Комп. класс'):
- (lang==='en'?'Practice':'Практика')
- return(
- <div key={r.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:9}}>
- <div style={{width:32,height:32,borderRadius:8,background:r.is_active?typeColor+'22':'var(--danger)15',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:r.is_active?typeColor:'var(--danger)',flexShrink:0}}>
- {r.is_active?'RM':'LCK'}
- </div>
- <div style={{flex:1,minWidth:0}}>
- <div style={{fontWeight:700,fontSize:13,display:'flex',alignItems:'center',gap:6}}>
- {r.name}
- {!r.is_active&&<span style={{fontSize:10,fontWeight:700,color:'var(--danger)',background:'var(--danger)15',padding:'1px 6px',borderRadius:20}}>
- {lang==='en'?'CLOSED':lang==='kz'?'ЖАБЫҚ':'ЗАКРЫТА'}
- </span>}
- </div>
- <div style={{fontSize:11,color:'var(--text2)',marginTop:2,display:'flex',gap:8}}>
- <span style={{color:typeColor,fontWeight:600}}>{typeLabel}</span>
- <span>{r.capacity} {lang==='en'?'seats':lang==='kz'?'орын':'мест'}</span>
- </div>
- </div>
- <button className="btn btn-secondary btn-sm" onClick={()=>openEditRoom(r)} title={lang==='en'?'Edit':lang==='kz'?'Өңдеу':'Изменить'}>ED</button>
- <button className={`btn btn-sm ${r.is_active?'btn-secondary':'btn-success'}`}
- onClick={()=>toggleRoomActive(r.id)}
- title={r.is_active?(lang==='en'?'Close room':lang==='kz'?'Жабу':'Закрыть'):(lang==='en'?'Open room':lang==='kz'?'Ашу':'Открыть')}>
- {r.is_active?'LCK':'OPN'}
- </button>
- <button className="btn btn-danger btn-sm" onClick={()=>deleteRoom(r.id)}>DEL</button>
- </div>
- )
- })}
+  const icons: Record<string,string> = {
+    'LECTURE_HALL':'🎓','PC_LAB':'💻','PRACTICE':'📚','GYM':'⚽'
+  }
+  const icon = icons[r.room_type] || '🏫'
+  const typeLabel = r.room_type==='LECTURE_HALL'?(lang==='en'?'Lecture Hall':lang==='kz'?'Дәрісхана':'Лекц. зал'):
+    r.room_type==='PC_LAB'?(lang==='en'?'PC Lab':lang==='kz'?'Комп. класс':'Комп. класс'):
+    r.room_type==='GYM'?(lang==='en'?'Gym':lang==='kz'?'Спорт залы':'Спортзал'):
+    (lang==='en'?'Practice Room':lang==='kz'?'Тәжірибе':'Практика')
+  const typeColor: Record<string,string> = {
+    'LECTURE_HALL':'var(--accent)','PC_LAB':'var(--info)','PRACTICE':'var(--prac)','GYM':'var(--warn)'
+  }
+  const bgColor: Record<string,string> = {
+    'LECTURE_HALL':'var(--accent)18','PC_LAB':'var(--info)18','PRACTICE':'var(--prac)18','GYM':'var(--warn)18'
+  }
+  return(
+    <div key={r.id} style={{
+      padding:'11px 13px',
+      background:'var(--bg3)',
+      border:'1px solid var(--border)',
+      borderRadius:10,
+      marginBottom:7
+    }}>
+      {/* Верхняя строка: иконка + номер + статус */}
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+        <div style={{width:36,height:36,borderRadius:9,flexShrink:0,
+          background:r.is_active?bgColor[r.room_type]||'var(--accent)18':'var(--danger)15',
+          display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>
+          {icon}
+        </div>
+        <div style={{fontWeight:700,fontSize:14,color:'var(--text)',flex:1}}>{r.name}</div>
+        {!r.is_active&&<span style={{fontSize:10,color:'var(--danger)',
+          background:'var(--danger)15',padding:'1px 7px',borderRadius:20,fontWeight:600,flexShrink:0}}>
+          {lang==='en'?'CLOSED':lang==='kz'?'ЖАБЫҚ':'ЗАКРЫТА'}
+        </span>}
+      </div>
+
+      {/* Нижняя строка: мета-инфо */}
+      <div style={{fontSize:12,color:'var(--text2)',marginBottom:10,paddingLeft:46,display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+        <span style={{color:typeColor[r.room_type]||'var(--accent)',fontWeight:600}}>{typeLabel}</span>
+        <span style={{color:'var(--text3)'}}>·</span>
+        <span>{r.capacity} {lang==='en'?'seats':lang==='kz'?'орын':'мест'}</span>
+        <span style={{color:'var(--text3)'}}>·</span>
+        <span style={{color:r.is_active?'var(--success)':'var(--danger)',fontWeight:600}}>
+          {r.is_active
+            ?(lang==='en'?'Active':lang==='kz'?'Белсенді':'Активна')
+            :(lang==='en'?'Closed':lang==='kz'?'Жабық':'Закрыта')}
+        </span>
+      </div>
+
+      {/* Кнопки — отдельная строка, никогда не перекрывают текст */}
+      <div style={{display:'flex',gap:6,paddingLeft:46}}>
+        <button className="btn btn-secondary btn-sm" onClick={()=>openEditRoom(r)}>
+          {lang==='en'?'Edit':lang==='kz'?'Өзг.':'Изм.'}
+        </button>
+        <button className={`btn btn-sm ${r.is_active?'btn-secondary':'btn-success'}`}
+          onClick={()=>toggleRoomActive(r.id)}>
+          {r.is_active
+            ?(lang==='en'?'Lock':lang==='kz'?'Жабу':'Закрыть')
+            :(lang==='en'?'Open':lang==='kz'?'Ашу':'Открыть')}
+        </button>
+        <button className="btn btn-danger btn-sm" onClick={()=>deleteRoom(r.id)}>
+          {lang==='en'?'Del':lang==='kz'?'Жою':'Удал.'}
+        </button>
+      </div>
+    </div>
+  )
+})}
  </div>
  </div>
  </div>
@@ -2137,6 +2293,35 @@ export default function App(){
  </div>
  </div>
  )}
+
+{/* ===== SCHEDULE EDIT MODAL ===== */}
+{editModalItem && editModalIndex >= 0 && (
+  <ScheduleEditModal
+    item={editModalItem}
+    itemIndex={editModalIndex}
+    schedule={schedule}
+    allRooms={rooms}
+    allTeachers={tNames}
+    lang={lang}
+    onClose={() => { setEditModalItem(null); setEditModalIndex(-1) }}
+    onApply={handleApplyEdit}
+  />
+)}
+
+{/* ===== TOAST ===== */}
+{toast && (
+  <div style={{
+    position:'fixed', bottom:24, right:24, zIndex:500,
+    padding:'13px 20px', borderRadius:9, fontSize:13, fontWeight:700,
+    background: toast.type==='success' ? 'var(--success)' : 'var(--warn)',
+    color:'#fff', boxShadow:'0 8px 32px rgba(0,0,0,.35)',
+    display:'flex', alignItems:'center', gap:12, animation:'slideUp .2s',
+    maxWidth:360,
+  }}>
+    <span>{toast.msg}</span>
+    <button onClick={()=>setToast(null)} style={{background:'none',border:'none',color:'#fff',cursor:'pointer',fontSize:18,lineHeight:1,opacity:.75}}>×</button>
+  </div>
+)}
 
  {sidebarOpen&&<div style={{position:'fixed',inset:0,background:'#00000055',zIndex:99}} onClick={()=>setSidebarOpen(false)}/>}
  </div>
